@@ -74,7 +74,7 @@ class ConsistentContinuousLoss(Module):
         self.cluster_loss = ClusterLoss()
         self.continuous_loss = ContinuousLoss()
 
-    def forward(self, input_group: Tensor) -> Tensor:
+    def forward(self, input_group: Tensor):
         clu_loss = self.cluster_loss(input_group)
         con_loss = self.continuous_loss(input_group)
-        return clu_loss + con_loss
+        return clu_loss, con_loss

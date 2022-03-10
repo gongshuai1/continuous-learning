@@ -12,13 +12,17 @@ import argparse
 import random
 import warnings
 import builtins
+import shutil
+import math
 import os
+import time
 import torch
 import torchvision.models as models
 import torch.backends.cudnn as cudnn
 import torch.multiprocessing as mp
 import torch.distributed as dist
 from cl.loss import ConsistentContinuousLoss
+from cl.loader import load_data
 
 model_names = sorted(name for name in models.__dict__
                      if name.islower() and not name.startswith('__') and callable(models.__dict__[name]))
@@ -42,10 +46,14 @@ parser.add_argument('--lr', '--learning_rate', default=0.03, type=float, metavar
                     help='initial learning rate')
 parser.add_argument('--schedule', default=[120, 160], nargs='*', type=int,
                     help='learning rate schedule (when to drop lr by 10x)')
+parser.add_argument('--cos', action='store_true',
+                    help='use cosine lr schedule')
 parser.add_argument('--wd', '--weight_decay', default=1e-4, type=float, metavar='W', dest='weight_decay',
                     help='weight decay (default: 1e-4)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none).')
+parser.add_argument('-p', '--print-freq', default=10, type=int, metavar='N',
+                    help='print frequency (default: 10)')
 
 # Distributed Config
 parser.add_argument('--world_size', default=-1, type=int,
@@ -150,7 +158,7 @@ def main_worker(gpu, ngpus_per_node, args):
         raise NotImplementedError('Only DistributedDataParallel is supported')
 
     # Define loss function and optimizer
-    loss = ConsistentContinuousLoss().cuda(args.gpu)
+    criterion = ConsistentContinuousLoss().cuda(args.gpu)
     optimizer = torch.optim.SGD(model.parameters(), args.lr, weight_decay=args.weight_decay)
 
     # Optionally resume from a checkpoint
@@ -173,10 +181,128 @@ def main_worker(gpu, ngpus_per_node, args):
     cudnn.benchmark = True
 
     # Load data
+    data_loader = load_data(train_dir=args.data, batch_size=args.batch_size, shuffle=True)
+
+    # Training
+    for epoch in range(args.start_epoch, args.epochs):
+        adjust_learning_rate(optimizer, epoch, args)
+
+        # Train for one epoch
+        train_one_epoch(data_loader, model, criterion, optimizer, epoch, args)
+
+        if not args.multiprocessing_distributed or \
+                (args.multiprocessing_distributed and args.rank * ngpus_per_node == 0):
+            save_checkpoint({
+                'epoch': epoch + 1,
+                'arch': args.arch,
+                'state_dict': model.state_dict(),
+                'optimizer': optimizer.state_dict()
+            }, is_best=False, filename='checkpoint_{:04d}.pth.tar'.format(epoch))
 
 
-def train_one_epoch():
-    pass
+def train_one_epoch(data_loader, model, criterion, optimizer, epoch, args):
+    batch_time = AverageMeter('Time', ':6.3f')
+    data_time = AverageMeter('Data', ':6.3f')
+    losses = AverageMeter('Loss', ':.4e')
+    consistent_loss = AverageMeter('Loss@consistent', ':.4e')
+    continuous_loss = AverageMeter('Loss@Continuous', ':.4e')
+    progress = ProgressMeter(
+        len(data_loader),
+        [batch_time, data_time, losses, consistent_loss, continuous_loss],
+        prefix='Epoch: [{}]'.format(epoch)
+    )
+
+    # Switch to train mode
+    model.train()
+
+    end = time.time()
+    for i, (frames, _) in enumerate(data_loader):
+        # Measure data loading time
+        data_time.update(time.time() - end)
+
+        if args.gpu is not None:
+            frames = frames.cuda(args.gpu, non_blocking=True)
+
+        # Compute output
+        output = model(frames)
+        cons_loss, cont_loss = criterion(output)
+        loss = cons_loss + cont_loss
+
+        # Record loss
+        losses.update(loss, frames.size(0))
+        consistent_loss.update(cons_loss, frames.size(0))
+        continuous_loss.update(cont_loss, frames.size(0))
+
+        # Compute gradient and do SGD step
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        # Measure elapsed time
+        batch_time.update(time.time() - end)
+        end = time.time()
+
+        if i % args.print_freq == 0:
+            progress.display(i)
+
+
+def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
+    torch.save(state, filename)
+    if is_best:
+        shutil.copyfile(filename, 'model_best.pth.tar')
+
+
+class AverageMeter(object):
+    """ Compute and store the average and current value """
+    def __init__(self, name, fmt=':f'):
+        self.name = name
+        self.fmt = fmt
+        self.reset()
+
+    def reset(self):
+        self.value = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.value = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
+
+    def __str__(self):
+        fmtstr = '{name} {val' + self.fmt + '} ({avg' + self.fmt + '})'
+        return fmtstr.format(**self.__dict__)
+
+
+class ProgressMeter(object):
+    def __init__(self, num_batches, meters, prefix=""):
+        self.batch_fmtstr = self._get_batch_fmtstr(num_batches)
+        self.meters = meters
+        self.prefix = prefix
+
+    def display(self, batch):
+        entries = [self.prefix + self.batch_fmtstr.format(batch)]
+        entries += [str(meter) for meter in self.meters]
+        print('\t'.join(entries))
+
+    def _get_batch_fmtstr(self, num_batches):
+        num_digits = len(str(num_batches // 1))
+        fmt = '{:' + str(num_digits) + 'd}'
+        return '[' + fmt + '/' + fmt.format(num_batches) + ']'
+
+
+def adjust_learning_rate(optimizer, epoch, args):
+    """ Decay the learning rate based on schedule """
+    lr = args.lr
+    if args.cos:  # cosine lr schedule
+        lr *= 0.5 *(1. + math.cos(math.pi * epoch / args.epochs))
+    else:  # stepwise lr schedule
+        for milestone in args.schedule:
+            lr *= 0.1 if epoch >= milestone else 1.
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
 
 
 if __name__ == '__main__':

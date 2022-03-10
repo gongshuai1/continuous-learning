@@ -77,7 +77,7 @@ def extract_image_from_video(video_path, augmentation, interval=10):
     cap.release()
     cv2.destroyAllWindows()
     print('Process total time:{:.2f}'.format(te - ts))
-    return torch.Tensor([item.numpy() for item in image_group])  # (frames, channels, height, weight)
+    return torch.stack(image_group)  # (frames, channels, height, weight)
 
 
 def fitting():
