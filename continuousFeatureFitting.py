@@ -24,6 +24,7 @@ from torchvision import models
 def extract_image_from_video(video_path, augmentation, interval=10):
     """
     Extract images from video
+    :param augmentation: augmentation
     :param video_path: video path
     :param interval: interval
     :return:
@@ -133,3 +134,14 @@ if __name__ == '__main__':
     # arr.append(torch.zeros((5, 5, 3)))
     # arr = torch.Tensor([item.numpy() for item in arr])
     # print('arr = ' + str(arr))
+
+    # a = torch.rand((5, 10, 128))
+    # idx = torch.arange(0, len(a[1]) - 2)
+    # mid_features = (a[:, idx, :] + a[:, idx+2, :])/2
+    # continuous_loss = torch.sum(torch.norm(mid_features - a[:, idx + 1, :], p=2, dim=1), dim=1)
+    # print('continuous_loss = ' + str(continuous_loss))
+
+    # mean_feature = torch.sum(a, dim=1)/len(a[1])
+    # mean_feature = torch.unsqueeze(mean_feature, dim=1)
+    # cluster_loss = torch.sum(torch.norm(a - mean_feature, p=2, dim=2), dim=1)
+    # print('cluster_loss = ' + str(cluster_loss))
