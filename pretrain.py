@@ -39,7 +39,7 @@ parser.add_argument('--epochs', default=200, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
-parser.add_argument('-b', '--batch_size', default=256, type=int, metavar='N',
+parser.add_argument('-b', '--batch_size', default=4, type=int, metavar='N',
                     help='mini-batch size (default: 256), this is the total batch size of all GPUS'
                          'on the current node when using Data Parallel or Distributed Data Parallel')
 parser.add_argument('--lr', '--learning_rate', default=0.03, type=float, metavar='LR', dest='lr',
@@ -60,7 +60,11 @@ parser.add_argument('--world_size', default=-1, type=int,
                     help='number of nodes for distributed training')
 parser.add_argument('--rank', default=-1, type=int,
                     help='node rank for distributed training')
-parser.add_argument('--dist_url', default='tcp://224.66.41.62:23456', type=str,
+# parser.add_argument('--dist_url', default='tcp://224.66.41.62:23456', type=str,
+#                     help='url used to set up distributed training')
+# parser.add_argument('--dist_backend', default='nccl', type=str,
+#                     help='distributed backend')
+parser.add_argument('--dist_url', default='env://', type=str,
                     help='url used to set up distributed training')
 parser.add_argument('--dist_backend', default='nccl', type=str,
                     help='distributed backend')
@@ -124,10 +128,11 @@ def main_worker(gpu, ngpus_per_node, args):
             args.rank = args.rank * ngpus_per_node + gpu
         dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
                                 world_size=args.world_size, rank=args.rank)
+        # dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url)
 
     # Create model - ResNet50 or ViT
     print("=> create model '{}'".format(args.arch))
-    model = models.__dict__[args.arch]
+    model = models.__dict__[args.arch]()
     print(model)
 
     if args.distributed:
@@ -224,8 +229,18 @@ def train_one_epoch(data_loader, model, criterion, optimizer, epoch, args):
             frames = frames.cuda(args.gpu, non_blocking=True)
 
         # Compute output
-        output = model(frames)
-        cons_loss, cont_loss = criterion(output)
+        # The input dimension of model(resnet or vit) is (N, channels, height, width),
+        # but for our pretraining, the input dimension is (N, frames, channels, height, width),
+        # so we need to adjust the input dimension to fit the model.
+        cnt_frames = frames.shape[1]
+        outputs = []
+        for j in range(cnt_frames):
+            frame = frames[:, j, :, :, :]  # (N, channels, height, width)
+            output = model(frame)  # (N, dim)
+            outputs.append(output)
+        outputs = torch.stack(outputs, dim=1)  # (N, frames, dim)
+
+        cons_loss, cont_loss = criterion(outputs)
         loss = cons_loss + cont_loss
 
         # Record loss
@@ -307,3 +322,13 @@ def adjust_learning_rate(optimizer, epoch, args):
 
 if __name__ == '__main__':
     main()
+    # frames = torch.rand((3, 10, 3, 224, 224))
+    # model = models.resnet50(pretrained=True)
+    # cnt_frames = frames.shape[1]
+    # outputs = []
+    # for j in range(cnt_frames):
+    #     frame = frames[:, j, :, :, :]  # (N, channels, height, width)
+    #     output = model(frame)  # (N, dim)
+    #     outputs.append(output)
+    # outputs = torch.stack(outputs, dim=1)
+    # print(f'outputs.shape = {outputs.shape}')

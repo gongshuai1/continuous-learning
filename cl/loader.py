@@ -33,17 +33,18 @@ def load_video_path(train_dir):
     return video_paths
 
 
-def extract_image_from_video(video_path, augmentation, interval=10):
+def extract_image_from_video(video_path, augmentation, num_frames, interval=10):
     """
-    Extract images from videos
+    Extract images from videos, we should
     Args:
         video_path: video path
         augmentation: augmentation
+        num_frames: the total number of frames extracted from one video
         interval: interval
     Return:
         data_loader
     """
-    image_group = []
+    frames = []
 
     idx1 = video_path.rfind('/')
     idx2 = video_path.rfind('.')
@@ -69,7 +70,7 @@ def extract_image_from_video(video_path, augmentation, interval=10):
     print('Total images:{:.0f}'.format(total_images))
 
     ts = time.time()
-    while cap.isOpened():
+    while cap.isOpened() and num < num_frames:
         ret, image = cap.read()
         if ret:
             cnt += 1
@@ -79,7 +80,7 @@ def extract_image_from_video(video_path, augmentation, interval=10):
                 image = image.float()
                 image = image.permute(2, 0, 1)  # (channels, height, width)
                 image = augmentation(image)
-                image_group.append(image)
+                frames.append(image)
                 # cv2.imwrite(save_path + '/%07d.jpg' % num, image)
                 remain_image = total_images - num
                 print('Processing %07d.jpg, remain images: %d' % (num, remain_image))
@@ -90,11 +91,29 @@ def extract_image_from_video(video_path, augmentation, interval=10):
     te = time.time()
     cap.release()
     cv2.destroyAllWindows()
+
+    # The video is too short to get enough frames,
+    # we reversal the extracted frames and append them to the end of the extracted frames
+    # until the total number of frames is enough
+    if num < num_frames:
+        image_group = []
+        num = 0
+        length = len(frames)
+        while num < num_frames:
+            rounds = num // length
+            idx = num % length
+            if rounds % 2 == 0:
+                image_group.append(frames[idx])
+            else:
+                image_group.append(frames[length - idx])
+            num += 1
+    else:
+        image_group = frames
     print('Process total time:{:.2f}'.format(te - ts))
     return torch.stack(image_group)  # (frames, channels, height, width)
 
 
-def load_data(train_dir, batch_size, shuffle=True):
+def load_data(train_dir, batch_size, num_frames, shuffle=True):
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     augmentation = transforms.Compose([
         transforms.CenterCrop(2048),
@@ -116,10 +135,10 @@ def load_data(train_dir, batch_size, shuffle=True):
         batch_video_paths = video_paths[(i * batch_size): min((i + 1) * batch_size, len(video_paths))]
         mini_batch = []
         for video_path in batch_video_paths:
-            mini_batch.append(extract_image_from_video(video_path, augmentation, interval=10))
+            mini_batch.append(extract_image_from_video(video_path, augmentation, num_frames, interval=10))
         yield torch.stack(mini_batch)  # (N, frames, channels, height, width)
 
 
 if __name__ == '__main__':
-    train_dir = 'F:\papers\\video'
+    train_dir = 'F:\papers\\video\dataset'
     load_data(train_dir, batch_size=2, shuffle=True)
