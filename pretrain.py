@@ -17,24 +17,26 @@ import math
 import os
 import time
 import torch
+import torchvision.transforms as transforms
 import torchvision.models as models
 import torch.backends.cudnn as cudnn
 import torch.multiprocessing as mp
 import torch.distributed as dist
+import torch.utils.data
 from cl.loss import ConsistentContinuousLoss
-from cl.loader import load_data
+from dataset.VideoDataset import VideoDataset
 
 model_names = sorted(name for name in models.__dict__
                      if name.islower() and not name.startswith('__') and callable(models.__dict__[name]))
 
 parser = argparse.ArgumentParser(description='PyTorch Video Pretrain')
 parser.add_argument('--seed', default=None, type=int, help='seed for initializing training.')
-parser.add_argument('data', metavar='DIR',
+parser.add_argument('dataset', metavar='DIR',
                     help='path to dataset')
 parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet50', choices=model_names,
                     help='model architecture: ' + ' | '.join(model_names) + ' (default: resnet50)')
 parser.add_argument('-j', '--workers', default=32, type=int, metavar='N',
-                    help='number of data loading workers (default: 32)')
+                    help='number of dataset loading workers (default: 32)')
 parser.add_argument('--epochs', default=200, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
@@ -60,11 +62,7 @@ parser.add_argument('--world_size', default=-1, type=int,
                     help='number of nodes for distributed training')
 parser.add_argument('--rank', default=-1, type=int,
                     help='node rank for distributed training')
-# parser.add_argument('--dist_url', default='tcp://224.66.41.62:23456', type=str,
-#                     help='url used to set up distributed training')
-# parser.add_argument('--dist_backend', default='nccl', type=str,
-#                     help='distributed backend')
-parser.add_argument('--dist_url', default='env://', type=str,
+parser.add_argument('--dist_url', default='env://127.0.0.1:23456', type=str,
                     help='url used to set up distributed training')
 parser.add_argument('--dist_backend', default='nccl', type=str,
                     help='distributed backend')
@@ -73,12 +71,18 @@ parser.add_argument('--gpu', default=None, type=int,
 parser.add_argument('--multiprocessing-distributed', action='store_true',
                     help='Use multi-processing distributed training to launch N processes per node, which has N GPUs.'
                          'This is the fastest way to use PyTorch for '
-                         'either single node or multi node data parallel training')
+                         'either single node or multi node dataset parallel training')
+
+# Model config
+parser.add_argument('--num_frames', default=50, type=int,
+                    help='number of frames extracted from each video')
 
 
 def main():
     # Parameters and Distributed config
     args = parser.parse_args()
+    os.environ['MASTER_ADDR'] = '127.0.0.1'
+    os.environ['MASTER_PORT'] = '23456'
 
     if args.seed is not None:
         random.seed(args.seed)
@@ -90,7 +94,7 @@ def main():
                       'You may see unexpected behavior when restarting from checkpoints')
 
     if args.gpu is not None:
-        warnings.warn('You have chosen a specific GPU. This will completely disable data parallel.')
+        warnings.warn('You have chosen a specific GPU. This will completely disable dataset parallel.')
 
     if args.dist_url == 'env://' and args.world_size == -1:
         args.world_size = int(os.environ['WORLD_SIZE'])
@@ -126,9 +130,10 @@ def main_worker(gpu, ngpus_per_node, args):
         if args.multiprocessing_distributed:
             # For multiprocessing distributed training, rank needs to be the global rank among all the processes
             args.rank = args.rank * ngpus_per_node + gpu
-        dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
+        # dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
+        #                         world_size=args.world_size, rank=args.rank)
+        dist.init_process_group(backend=args.dist_backend, init_method="env://127.0.0.1:23456",
                                 world_size=args.world_size, rank=args.rank)
-        # dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url)
 
     # Create model - ResNet50 or ViT
     print("=> create model '{}'".format(args.arch))
@@ -185,8 +190,22 @@ def main_worker(gpu, ngpus_per_node, args):
 
     cudnn.benchmark = True
 
-    # Load data
-    data_loader = load_data(train_dir=args.data, batch_size=args.batch_size, shuffle=True)
+    # Load dataset
+    # data_loader = load_data(train_dir=args.dataset, batch_size=args.batch_size, shuffle=True)
+    # dataset = load_data(train_dir=args.data, num_frames=100)
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    augmentation = transforms.Compose([
+        transforms.CenterCrop(2048),
+        transforms.Resize(512),
+        transforms.RandomGrayscale(p=0.2),
+        transforms.ColorJitter(0.4, 0.4, 0.4, 0.4),
+        # transforms.ToTensor(),
+        normalize
+    ])
+    dataset = VideoDataset(data_dir=args.dataset, transforms=augmentation, num_frames=args.num_frames)
+    data_sampler = torch.utils.data.distributed.DistributedSampler(dataset)
+    data_loader = torch.utils.data.DataLoader(
+        dataset, batch_size=args.batch_size, sampler=data_sampler, collate_fn=VideoDataset.collate_fn)
 
     # Training
     for epoch in range(args.start_epoch, args.epochs):
@@ -221,8 +240,8 @@ def train_one_epoch(data_loader, model, criterion, optimizer, epoch, args):
     model.train()
 
     end = time.time()
-    for i, (frames, _) in enumerate(data_loader):
-        # Measure data loading time
+    for i, frames in enumerate(data_loader):
+        # Measure dataset loading time
         data_time.update(time.time() - end)
 
         if args.gpu is not None:

@@ -33,7 +33,7 @@ def extract_image_from_video(video_path, augmentation, interval=10):
 
     idx1 = video_path.rfind('/')
     idx2 = video_path.rfind('.')
-    save_path = './data/' + video_path[idx1+1: idx2]
+    save_path = './dataset/' + video_path[idx1+1: idx2]
 
     if os.path.exists(save_path):
         pass
@@ -81,9 +81,9 @@ def extract_image_from_video(video_path, augmentation, interval=10):
 
 
 def fitting():
-    # 1.Load data
+    # 1.Load dataset
     # example video about Shiba Inu(柴犬) from:https://www.pexels.com/zh-cn/video/4503918/
-    video_path = './data/shiba_Inu.mp4'
+    video_path = 'dataset/shiba_Inu.mp4'
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     augmentation = transforms.Compose([
         transforms.CenterCrop(2048),

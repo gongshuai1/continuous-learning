@@ -11,8 +11,8 @@
 import os
 import cv2
 import time
-import torch
 import math
+import torch
 import numpy as np
 import torchvision.transforms as transforms
 
@@ -21,7 +21,7 @@ def load_video_path(train_dir):
     """
     Load video path
     Args:
-        train_dir: the path of training data
+        train_dir: the path of training dataset
     Return:
         a list of all training videos' path
     """
@@ -29,7 +29,7 @@ def load_video_path(train_dir):
     if os.path.exists(train_dir):
         for parent, dir_names, file_names in os.walk(train_dir):
             for file_name in file_names:
-                video_paths.append(parent + "\\" + file_name)
+                video_paths.append(parent + "/" + file_name)
     return video_paths
 
 
@@ -46,14 +46,14 @@ def extract_image_from_video(video_path, augmentation, num_frames, interval=10):
     """
     frames = []
 
-    idx1 = video_path.rfind('/')
-    idx2 = video_path.rfind('.')
-    save_path = './data/' + video_path[idx1+1: idx2]
-
-    if os.path.exists(save_path):
-        pass
-    else:
-        os.mkdir(save_path)
+    # idx1 = video_path.rfind('/')
+    # idx2 = video_path.rfind('.')
+    # save_path = './dataset/' + video_path[idx1+1: idx2]
+    #
+    # if os.path.exists(save_path):
+    #     pass
+    # else:
+    #     os.mkdir(save_path)
 
     cap = cv2.VideoCapture(video_path)
     fps = int(cap.get(cv2.CAP_PROP_FPS))
@@ -62,6 +62,7 @@ def extract_image_from_video(video_path, augmentation, num_frames, interval=10):
     frame_num = cap.get(7)  # total frame num
     duration = frame_num / rate
     print('video total time:{:.2f}s'.format(duration))
+
 
     # height, width = 1080, 1920
     cnt = 0
@@ -82,8 +83,8 @@ def extract_image_from_video(video_path, augmentation, num_frames, interval=10):
                 image = augmentation(image)
                 frames.append(image)
                 # cv2.imwrite(save_path + '/%07d.jpg' % num, image)
-                remain_image = total_images - num
-                print('Processing %07d.jpg, remain images: %d' % (num, remain_image))
+                # remain_image = total_images - num
+                # print('Processing %07d.jpg, remain images: %d' % (num, remain_image))
         else:
             break
         if cv2.waitKey(1) & 0xff == 27:
@@ -105,7 +106,7 @@ def extract_image_from_video(video_path, augmentation, num_frames, interval=10):
             if rounds % 2 == 0:
                 image_group.append(frames[idx])
             else:
-                image_group.append(frames[length - idx])
+                image_group.append(frames[length - idx - 1])
             num += 1
     else:
         image_group = frames
@@ -124,6 +125,7 @@ def load_data(train_dir, batch_size, num_frames, shuffle=True):
         normalize
     ])
 
+
     # Load video paths
     video_paths = np.array(load_video_path(train_dir))
     idx = np.arange(len(video_paths))
@@ -140,5 +142,17 @@ def load_data(train_dir, batch_size, num_frames, shuffle=True):
 
 
 if __name__ == '__main__':
-    train_dir = 'F:\papers\\video\dataset'
-    load_data(train_dir, batch_size=2, shuffle=True)
+    # training_data_dir = 'F:\papers\\video\dataset'
+    # load_data(training_data_dir, batch_size=2, shuffle=True)
+    video_path = 'F:\papers\\video\dataset\\animals\\n010003.mp4'
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    augmentation = transforms.Compose([
+        transforms.CenterCrop(2048),
+        transforms.Resize(512),
+        transforms.RandomGrayscale(p=0.2),
+        transforms.ColorJitter(0.4, 0.4, 0.4, 0.4),
+        # transforms.ToTensor(),
+        normalize
+    ])
+    frames = extract_image_from_video(video_path, augmentation, 50)
+    print(f'frames.shape = {frames.shape}')
