@@ -148,7 +148,7 @@ if __name__ == '__main__':
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     augmentation = transforms.Compose([
         transforms.CenterCrop(2048),
-        transforms.Resize(512),
+        transforms.Resize((512, 512)),
         transforms.RandomGrayscale(p=0.2),
         transforms.ColorJitter(0.4, 0.4, 0.4, 0.4),
         # transforms.ToTensor(),

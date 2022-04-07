@@ -24,6 +24,7 @@ import torch.multiprocessing as mp
 import torch.distributed as dist
 import torch.utils.data
 from cl.loss import ConsistentContinuousLoss
+from cl.gpuInfo import check_gpu_mem_used_rate
 from dataset.VideoDataset import VideoDataset
 
 model_names = sorted(name for name in models.__dict__
@@ -138,7 +139,7 @@ def main_worker(gpu, ngpus_per_node, args):
     # Create model - ResNet50 or ViT
     print("=> create model '{}'".format(args.arch))
     model = models.__dict__[args.arch]()
-    print(model)
+    # print(model)
 
     if args.distributed:
         # For multiprocessing distributed, DistributedDataParallel constructor
@@ -151,12 +152,12 @@ def main_worker(gpu, ngpus_per_node, args):
             # we need to divide batch size ourselves based on the total number of GPUs we have
             args.batch_size = int(args.batch_size / ngpus_per_node)
             args.workers = int((args.workers + ngpus_per_node - 1) / ngpus_per_node)
-            model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
+            model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], broadcast_buffers=False)
         else:
             model.cuda()
             # DistributedDataParallel will divide and allocate batch size to
             # all available GPUs if device_ids are not set
-            model = torch.nn.parallel.DistributedDataParallel(model)
+            model = torch.nn.parallel.DistributedDataParallel(model, broadcast_buffers=False)
     elif args.gpu is not None:
         torch.cuda.set_device(args.gpu)
         model = model.cuda(args.gpu)
@@ -196,7 +197,7 @@ def main_worker(gpu, ngpus_per_node, args):
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     augmentation = transforms.Compose([
         transforms.CenterCrop(2048),
-        transforms.Resize(512),
+        transforms.Resize((224, 224)),
         transforms.RandomGrayscale(p=0.2),
         transforms.ColorJitter(0.4, 0.4, 0.4, 0.4),
         # transforms.ToTensor(),
@@ -205,7 +206,7 @@ def main_worker(gpu, ngpus_per_node, args):
     dataset = VideoDataset(data_dir=args.dataset, transforms=augmentation, num_frames=args.num_frames)
     data_sampler = torch.utils.data.distributed.DistributedSampler(dataset)
     data_loader = torch.utils.data.DataLoader(
-        dataset, batch_size=args.batch_size, sampler=data_sampler, collate_fn=VideoDataset.collate_fn)
+        dataset, batch_size=args.batch_size, sampler=data_sampler, collate_fn=VideoDataset.collate_fn, drop_last=True)
 
     # Training
     for epoch in range(args.start_epoch, args.epochs):
@@ -242,7 +243,9 @@ def train_one_epoch(data_loader, model, criterion, optimizer, epoch, args):
     end = time.time()
     for i, frames in enumerate(data_loader):
         # Measure dataset loading time
-        data_time.update(time.time() - end)
+        data_time.update(time.time() - end, 1)
+
+        check_gpu_mem_used_rate(f"Batch_{i}_start")
 
         if args.gpu is not None:
             frames = frames.cuda(args.gpu, non_blocking=True)
@@ -257,10 +260,17 @@ def train_one_epoch(data_loader, model, criterion, optimizer, epoch, args):
             frame = frames[:, j, :, :, :]  # (N, channels, height, width)
             output = model(frame)  # (N, dim)
             outputs.append(output)
+            # check_gpu_mem_used_rate(f"Batch_{i}_{j}_forward")
         outputs = torch.stack(outputs, dim=1)  # (N, frames, dim)
+
+        check_gpu_mem_used_rate(f"Batch_{i}_forward")
 
         cons_loss, cont_loss = criterion(outputs)
         loss = cons_loss + cont_loss
+
+        print(f"loss = {loss}")
+
+        check_gpu_mem_used_rate(f"Batch_{i}_loss")
 
         # Record loss
         losses.update(loss, frames.size(0))
@@ -272,8 +282,10 @@ def train_one_epoch(data_loader, model, criterion, optimizer, epoch, args):
         loss.backward()
         optimizer.step()
 
+        check_gpu_mem_used_rate(f"Batch_{i}_backward")
+
         # Measure elapsed time
-        batch_time.update(time.time() - end)
+        batch_time.update(time.time() - end, 1)
         end = time.time()
 
         if i % args.print_freq == 0:
@@ -306,7 +318,7 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
     def __str__(self):
-        fmtstr = '{name} {val' + self.fmt + '} ({avg' + self.fmt + '})'
+        fmtstr = '{name} {value' + self.fmt + '} ({avg' + self.fmt + '})'
         return fmtstr.format(**self.__dict__)
 
 

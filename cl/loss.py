@@ -75,6 +75,6 @@ class ConsistentContinuousLoss(Module):
         self.continuous_loss = ContinuousLoss()
 
     def forward(self, input_group: Tensor):
-        clu_loss = self.cluster_loss(input_group)
-        con_loss = self.continuous_loss(input_group)
+        clu_loss = torch.sum(self.cluster_loss(input_group))
+        con_loss = torch.sum(self.continuous_loss(input_group))
         return clu_loss, con_loss
