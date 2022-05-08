@@ -5,7 +5,7 @@
       <paths name="gongshuai@218.199.68.177:22">
         <serverdata>
           <mappings>
-            <mapping deploy="/home/gongshuai/pycharmProject/continuous_learning" local="$PROJECT_DIR$" />
+            <mapping local="$PROJECT_DIR$" web="/" />
           </mappings>
         </serverdata>
       </paths>

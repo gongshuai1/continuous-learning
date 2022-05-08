@@ -109,7 +109,7 @@ def main():
         # Use torch.multiprocessing.spawn to launch distributed processes: the main_worker process function
         mp.spawn(main_worker, nprocs=ngpus_per_node, args=(ngpus_per_node, args))
     else:
-        # Simply call mian_worker function
+        # Simply call main_worker function
         main_worker(args.gpu, ngpus_per_node, args)
 
 
@@ -196,7 +196,7 @@ def main_worker(gpu, ngpus_per_node, args):
     # dataset = load_data(train_dir=args.data, num_frames=100)
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     augmentation = transforms.Compose([
-        transforms.CenterCrop(2048),
+        transforms.CenterCrop(512),
         transforms.Resize((224, 224)),
         transforms.RandomGrayscale(p=0.2),
         transforms.ColorJitter(0.4, 0.4, 0.4, 0.4),

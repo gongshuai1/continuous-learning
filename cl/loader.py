@@ -48,13 +48,16 @@ def extract_image_from_video(video_path, augmentation, num_frames, interval=10):
 
     # idx1 = video_path.rfind('/')
     # idx2 = video_path.rfind('.')
-    # save_path = './dataset/' + video_path[idx1+1: idx2]
+    # # save_path = './dataset/' + video_path[idx1+1: idx2]
+    # save_path = video_path[idx1+1: idx2]
     #
     # if os.path.exists(save_path):
     #     pass
     # else:
     #     os.mkdir(save_path)
 
+    print(video_path)
+    print(os.path.exists(video_path))
     cap = cv2.VideoCapture(video_path)
     fps = int(cap.get(cv2.CAP_PROP_FPS))
     print('FPS:{:.2f}'.format(fps))
@@ -147,8 +150,8 @@ if __name__ == '__main__':
     video_path = 'F:\papers\\video\dataset\\animals\\n010003.mp4'
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     augmentation = transforms.Compose([
-        transforms.CenterCrop(2048),
-        transforms.Resize((512, 512)),
+        transforms.CenterCrop(512),
+        transforms.Resize((224, 224)),
         transforms.RandomGrayscale(p=0.2),
         transforms.ColorJitter(0.4, 0.4, 0.4, 0.4),
         # transforms.ToTensor(),
